@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1762320378030,
+      "tag": "0000_abandoned_mulholland_black",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1762322251820,
+      "tag": "0001_vengeful_wither",
+      "breakpoints": true
+    }
+  ]
+}
