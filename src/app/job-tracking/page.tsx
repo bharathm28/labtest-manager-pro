@@ -16,6 +16,7 @@ import Link from "next/link"
 import { useForm, Controller } from "react-hook-form"
 import { format } from "date-fns"
 import { useSearchParams } from "next/navigation"
+import { toast } from "sonner"
 
 type ServiceRequest = {
   id: number
@@ -179,33 +180,146 @@ export default function JobTrackingPage() {
         }
       })
 
+      // Track if test bed assignment changed
+      const testbedChanged = payload.assignedTestbedId !== selectedJob.assignedTestbedId
+      const previousTestbedId = selectedJob.assignedTestbedId
+
+      // Update service request
       const res = await fetch(`/api/service-requests?id=${selectedJob.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
 
-      if (res.ok) {
-        // If status changed, create history entry
-        if (data.status !== selectedJob.status) {
-          await fetch('/api/status-history', {
+      if (!res.ok) {
+        const error = await res.json()
+        toast.error(error.error || 'Failed to update job')
+        return
+      }
+
+      // If status changed, create history entry
+      if (data.status !== selectedJob.status) {
+        await fetch('/api/status-history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            serviceRequestId: selectedJob.id,
+            status: data.status,
+            notes: `Status updated from ${selectedJob.status} to ${data.status}`,
+            changedBy: 'System'
+          })
+        })
+      }
+
+      // Handle test bed assignment synchronization
+      if (testbedChanged && payload.assignedTestbedId) {
+        // Check if there's an existing testbed task for this service request
+        const existingTaskRes = await fetch(`/api/testbed-tasks?serviceRequestId=${selectedJob.id}`)
+        const existingTasks = await existingTaskRes.json()
+
+        if (existingTasks && existingTasks.length > 0) {
+          // Update existing task with new test bed
+          const existingTask = existingTasks.find((t: any) => t.status !== 'completed' && t.status !== 'cancelled')
+          
+          if (existingTask) {
+            // If test bed changed, update the task
+            await fetch(`/api/testbed-tasks?id=${existingTask.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                testbedId: payload.assignedTestbedId,
+                assignedEmployeeId: payload.assignedEmployeeId,
+                scheduledStartDate: payload.testingStartDate,
+                scheduledEndDate: payload.testingEndDate,
+                notes: `Test bed changed from ${previousTestbedId} to ${payload.assignedTestbedId}`
+              })
+            })
+          }
+        } else {
+          // Create new testbed task
+          await fetch('/api/testbed-tasks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               serviceRequestId: selectedJob.id,
-              status: data.status,
-              notes: `Status updated from ${selectedJob.status} to ${data.status}`,
-              changedBy: 'System'
+              testbedId: payload.assignedTestbedId,
+              assignedEmployeeId: payload.assignedEmployeeId,
+              priority: 'normal',
+              scheduledStartDate: payload.testingStartDate,
+              scheduledEndDate: payload.testingEndDate,
+              notes: `Task created for job ${selectedJob.jobCardNumber}`
             })
           })
         }
 
-        setIsEditDialogOpen(false)
-        setSelectedJob(null)
-        fetchJobs()
+        // Update test bed status if job is in testing
+        if (data.status === 'testing') {
+          await fetch(`/api/test-beds?id=${payload.assignedTestbedId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              status: 'in_use'
+            })
+          })
+        }
       }
+
+      // If test bed was removed, update testbed tasks
+      if (testbedChanged && !payload.assignedTestbedId && previousTestbedId) {
+        const existingTaskRes = await fetch(`/api/testbed-tasks?serviceRequestId=${selectedJob.id}`)
+        const existingTasks = await existingTaskRes.json()
+        
+        // Cancel any active tasks
+        for (const task of existingTasks) {
+          if (task.status === 'queued' || task.status === 'in_progress') {
+            await fetch(`/api/testbed-tasks?id=${task.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                status: 'cancelled',
+                notes: 'Test bed assignment removed'
+              })
+            })
+          }
+        }
+      }
+
+      // Update test bed status based on job status
+      if (payload.assignedTestbedId) {
+        if (data.status === 'testing') {
+          // Start the testbed task
+          const taskRes = await fetch(`/api/testbed-tasks?serviceRequestId=${selectedJob.id}`)
+          const tasks = await taskRes.json()
+          const activeTask = tasks.find((t: any) => t.status === 'queued' || t.status === 'in_progress')
+          
+          if (activeTask && activeTask.status === 'queued') {
+            await fetch(`/api/testbed-tasks/${activeTask.id}/start`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' }
+            })
+          }
+        } else if (data.status === 'completed') {
+          // Complete the testbed task
+          const taskRes = await fetch(`/api/testbed-tasks?serviceRequestId=${selectedJob.id}`)
+          const tasks = await taskRes.json()
+          const activeTask = tasks.find((t: any) => t.status === 'in_progress' || t.status === 'queued')
+          
+          if (activeTask) {
+            await fetch(`/api/testbed-tasks/${activeTask.id}/complete`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' }
+            })
+          }
+        }
+      }
+
+      toast.success('Job updated successfully and synced with test beds')
+      setIsEditDialogOpen(false)
+      setSelectedJob(null)
+      fetchJobs()
     } catch (error) {
       console.error('Failed to update job:', error)
+      toast.error('Failed to update job')
     }
   }
 
