@@ -15,6 +15,13 @@
       "when": 1762322251820,
       "tag": "0001_vengeful_wither",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1762406708223,
+      "tag": "0002_confused_chronomancer",
+      "breakpoints": true
     }
   ]
 }

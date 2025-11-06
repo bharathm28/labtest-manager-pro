@@ -125,3 +125,33 @@ export const inventoryLogs = sqliteTable('inventory_logs', {
   timestamp: text('timestamp').notNull(),
   notes: text('notes'),
 });
+
+// Test Bed Tasks table
+export const testbedTasks = sqliteTable('testbed_tasks', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  serviceRequestId: integer('service_request_id').references(() => serviceRequests.id).notNull(),
+  testbedId: integer('testbed_id').references(() => testBeds.id).notNull(),
+  assignedEmployeeId: integer('assigned_employee_id').references(() => employees.id),
+  status: text('status').notNull().default('queued'),
+  priority: text('priority').default('normal'),
+  scheduledStartDate: text('scheduled_start_date'),
+  scheduledEndDate: text('scheduled_end_date'),
+  actualStartDate: text('actual_start_date'),
+  actualEndDate: text('actual_end_date'),
+  queuePosition: integer('queue_position').default(0),
+  notes: text('notes'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+// Test Bed Task Transfers table
+export const testbedTaskTransfers = sqliteTable('testbed_task_transfers', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  taskId: integer('task_id').references(() => testbedTasks.id).notNull(),
+  fromTestbedId: integer('from_testbed_id').references(() => testBeds.id).notNull(),
+  toTestbedId: integer('to_testbed_id').references(() => testBeds.id).notNull(),
+  reason: text('reason').notNull(),
+  transferredBy: text('transferred_by'),
+  transferredAt: text('transferred_at').notNull(),
+  notes: text('notes'),
+});
