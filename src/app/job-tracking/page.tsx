@@ -11,12 +11,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ArrowLeft, Search, Eye, Edit, History, Loader2, Calendar, Clock, AlertCircle } from "lucide-react"
+import { ArrowLeft, Search, Eye, Edit, History, Loader2, Calendar, Clock, AlertCircle, AlertTriangle } from "lucide-react"
 import Link from "next/link"
 import { useForm, Controller } from "react-hook-form"
 import { format } from "date-fns"
 import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 type ServiceRequest = {
   id: number
@@ -52,6 +53,13 @@ type StatusHistory = {
   changedAt: string
 }
 
+type ConflictCheck = {
+  conflicts: boolean
+  testbedConflicts: any[]
+  employeeConflicts: any[]
+  message: string
+}
+
 export default function JobTrackingPage() {
   const searchParams = useSearchParams()
   const [jobs, setJobs] = useState<ServiceRequest[]>([])
@@ -67,8 +75,10 @@ export default function JobTrackingPage() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false)
   const [statusHistory, setStatusHistory] = useState<StatusHistory[]>([])
+  const [conflictWarning, setConflictWarning] = useState<ConflictCheck | null>(null)
+  const [checkingConflicts, setCheckingConflicts] = useState(false)
 
-  const { register, handleSubmit, control, reset, formState: { errors, isSubmitting } } = useForm()
+  const { register, handleSubmit, control, reset, watch, formState: { errors, isSubmitting } } = useForm()
 
   const statusOptions = [
     { value: "all", label: "All Status" },
@@ -81,6 +91,51 @@ export default function JobTrackingPage() {
     { value: "completed", label: "Completed" },
     { value: "reported", label: "Reported" }
   ]
+
+  // Watch for changes in scheduling fields to check conflicts
+  const watchTestbedId = watch('assignedTestbedId')
+  const watchEmployeeId = watch('assignedEmployeeId')
+  const watchTestingStart = watch('testingStartDate')
+  const watchTestingEnd = watch('testingEndDate')
+
+  // Check for scheduling conflicts whenever relevant fields change
+  useEffect(() => {
+    if (isEditDialogOpen && watchTestbedId && watchTestbedId !== 'none' && watchTestingStart && watchTestingEnd) {
+      checkSchedulingConflicts()
+    } else {
+      setConflictWarning(null)
+    }
+  }, [watchTestbedId, watchEmployeeId, watchTestingStart, watchTestingEnd, isEditDialogOpen])
+
+  const checkSchedulingConflicts = async () => {
+    if (!watchTestbedId || watchTestbedId === 'none' || !watchTestingStart || !watchTestingEnd) {
+      return
+    }
+
+    setCheckingConflicts(true)
+    try {
+      const res = await fetch('/api/testbed-tasks/check-conflicts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          testbedId: parseInt(watchTestbedId),
+          employeeId: watchEmployeeId && watchEmployeeId !== 'none' ? parseInt(watchEmployeeId) : undefined,
+          scheduledStartDate: new Date(watchTestingStart).toISOString(),
+          scheduledEndDate: new Date(watchTestingEnd).toISOString(),
+          excludeTaskId: selectedJob?.id
+        })
+      })
+
+      if (res.ok) {
+        const data: ConflictCheck = await res.json()
+        setConflictWarning(data.conflicts ? data : null)
+      }
+    } catch (error) {
+      console.error('Failed to check conflicts:', error)
+    } finally {
+      setCheckingConflicts(false)
+    }
+  }
 
   const fetchJobs = async () => {
     setLoading(true)
@@ -160,12 +215,20 @@ export default function JobTrackingPage() {
   const onSubmitEdit = async (data: any) => {
     if (!selectedJob) return
 
+    // Warn about conflicts before submitting
+    if (conflictWarning && conflictWarning.conflicts) {
+      const confirmed = window.confirm(
+        `⚠️ SCHEDULING CONFLICTS DETECTED:\n\n${conflictWarning.message}\n\nDo you want to proceed anyway?`
+      )
+      if (!confirmed) return
+    }
+
     try {
       const payload = {
         ...data,
         companyId: parseInt(data.companyId),
-        assignedEmployeeId: data.assignedEmployeeId ? parseInt(data.assignedEmployeeId) : null,
-        assignedTestbedId: data.assignedTestbedId ? parseInt(data.assignedTestbedId) : null,
+        assignedEmployeeId: data.assignedEmployeeId && data.assignedEmployeeId !== 'none' ? parseInt(data.assignedEmployeeId) : null,
+        assignedTestbedId: data.assignedTestbedId && data.assignedTestbedId !== 'none' ? parseInt(data.assignedTestbedId) : null,
         quantity: data.quantity ? parseInt(data.quantity) : null,
         dcVerified: Boolean(data.dcVerified)
       }
@@ -195,20 +258,6 @@ export default function JobTrackingPage() {
         const error = await res.json()
         toast.error(error.error || 'Failed to update job')
         return
-      }
-
-      // If status changed, create history entry
-      if (data.status !== selectedJob.status) {
-        await fetch('/api/status-history', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            serviceRequestId: selectedJob.id,
-            status: data.status,
-            notes: `Status updated from ${selectedJob.status} to ${data.status}`,
-            changedBy: 'System'
-          })
-        })
       }
 
       // Handle test bed assignment synchronization
@@ -248,17 +297,6 @@ export default function JobTrackingPage() {
               scheduledStartDate: payload.testingStartDate,
               scheduledEndDate: payload.testingEndDate,
               notes: `Task created for job ${selectedJob.jobCardNumber}`
-            })
-          })
-        }
-
-        // Update test bed status if job is in testing
-        if (data.status === 'testing') {
-          await fetch(`/api/test-beds?id=${payload.assignedTestbedId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              status: 'in_use'
             })
           })
         }
@@ -316,6 +354,7 @@ export default function JobTrackingPage() {
       toast.success('Job updated successfully and synced with test beds')
       setIsEditDialogOpen(false)
       setSelectedJob(null)
+      setConflictWarning(null)
       fetchJobs()
     } catch (error) {
       console.error('Failed to update job:', error)
@@ -622,6 +661,54 @@ export default function JobTrackingPage() {
                 <DialogDescription>Update service request information and tracking</DialogDescription>
               </DialogHeader>
               
+              {/* Conflict Warning Alert */}
+              {conflictWarning && conflictWarning.conflicts && (
+                <Alert variant="destructive" className="mt-4">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>Scheduling Conflicts Detected!</AlertTitle>
+                  <AlertDescription className="mt-2">
+                    <p className="font-semibold">{conflictWarning.message}</p>
+                    
+                    {conflictWarning.testbedConflicts.length > 0 && (
+                      <div className="mt-3">
+                        <p className="font-semibold text-sm">Test Bed Conflicts:</p>
+                        <ul className="list-disc list-inside text-sm mt-1">
+                          {conflictWarning.testbedConflicts.map((conflict, idx) => (
+                            <li key={idx}>
+                              {conflict.jobCardNumber} ({conflict.status}) - {formatDateTime(conflict.scheduledStartDate)} to {formatDateTime(conflict.scheduledEndDate)}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    
+                    {conflictWarning.employeeConflicts.length > 0 && (
+                      <div className="mt-3">
+                        <p className="font-semibold text-sm">Employee Conflicts:</p>
+                        <ul className="list-disc list-inside text-sm mt-1">
+                          {conflictWarning.employeeConflicts.map((conflict, idx) => (
+                            <li key={idx}>
+                              {conflict.jobCardNumber} ({conflict.status}) - {formatDateTime(conflict.scheduledStartDate)} to {formatDateTime(conflict.scheduledEndDate)}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    
+                    <p className="mt-3 text-sm">
+                      ⚠️ Proceeding will create scheduling overlap. Consider rescheduling or using a different test bed/employee.
+                    </p>
+                  </AlertDescription>
+                </Alert>
+              )}
+              
+              {checkingConflicts && (
+                <div className="mt-4 flex items-center gap-2 text-sm text-gray-600">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Checking for scheduling conflicts...
+                </div>
+              )}
+              
               <Tabs defaultValue="basic" className="mt-4">
                 <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="basic">Basic Info</TabsTrigger>
@@ -784,7 +871,7 @@ export default function JobTrackingPage() {
               </Tabs>
 
               <DialogFooter className="mt-6">
-                <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                <Button type="button" variant="outline" onClick={() => { setIsEditDialogOpen(false); setConflictWarning(null); }}>
                   Cancel
                 </Button>
                 <Button type="submit" disabled={isSubmitting}>

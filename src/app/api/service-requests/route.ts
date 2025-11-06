@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
-import { serviceRequests, activityLogs } from '@/db/schema';
-import { eq, like, and, or, desc } from 'drizzle-orm';
+import { serviceRequests, activityLogs, statusHistory, testBeds } from '@/db/schema';
+import { eq, like, and, or, desc, ne } from 'drizzle-orm';
 
 const VALID_STATUSES = [
   'requested',
@@ -211,6 +211,15 @@ export async function POST(request: NextRequest) {
       })
     });
 
+    // Create initial status history entry
+    await db.insert(statusHistory).values({
+      serviceRequestId: newRecord[0].id,
+      status: status,
+      notes: `Service request created with status: ${status}`,
+      changedBy: 'System',
+      changedAt: new Date().toISOString(),
+    });
+
     return NextResponse.json(newRecord[0], { status: 201 });
 
   } catch (error) {
@@ -301,8 +310,12 @@ export async function PUT(request: NextRequest) {
       updatedAt: new Date().toISOString()
     };
 
-    // Track changes for activity logging
+    // Track changes for activity logging and status history
     const changes: Array<{fieldName: string, oldValue: any, newValue: any}> = [];
+    const currentTimestamp = new Date().toISOString();
+    let statusChanged = false;
+    let testbedChanged = false;
+    let oldTestbedId = existing[0].assignedTestbedId;
 
     if (body.jobCardNumber !== undefined) {
       updateData.jobCardNumber = body.jobCardNumber.trim();
@@ -340,12 +353,28 @@ export async function PUT(request: NextRequest) {
     if (body.specialRequirements !== undefined) {
       updateData.specialRequirements = body.specialRequirements ? body.specialRequirements.trim() : null;
     }
+    
+    // Status change handling with automatic completion timestamp
     if (body.status !== undefined) {
       updateData.status = body.status;
       if (updateData.status !== existing[0].status) {
+        statusChanged = true;
         changes.push({ fieldName: 'status', oldValue: existing[0].status, newValue: updateData.status });
+        
+        // Automatic completion timestamp capture
+        if (updateData.status === 'completed' && !existing[0].completionDate) {
+          updateData.completionDate = currentTimestamp;
+          changes.push({ fieldName: 'completionDate', oldValue: null, newValue: currentTimestamp });
+        }
+        
+        // Automatic testing start date capture
+        if (updateData.status === 'testing' && !existing[0].testingStartDate) {
+          updateData.testingStartDate = currentTimestamp;
+          changes.push({ fieldName: 'testingStartDate', oldValue: null, newValue: currentTimestamp });
+        }
       }
     }
+    
     if (body.requestedDate !== undefined) {
       updateData.requestedDate = body.requestedDate;
     }
@@ -370,12 +399,17 @@ export async function PUT(request: NextRequest) {
         changes.push({ fieldName: 'assignedEmployeeId', oldValue: String(existing[0].assignedEmployeeId), newValue: String(updateData.assignedEmployeeId) });
       }
     }
+    
+    // Test bed assignment change detection
     if (body.assignedTestbedId !== undefined) {
       updateData.assignedTestbedId = body.assignedTestbedId === null ? null : parseInt(body.assignedTestbedId);
       if (updateData.assignedTestbedId !== existing[0].assignedTestbedId) {
+        testbedChanged = true;
+        oldTestbedId = existing[0].assignedTestbedId;
         changes.push({ fieldName: 'assignedTestbedId', oldValue: String(existing[0].assignedTestbedId), newValue: String(updateData.assignedTestbedId) });
       }
     }
+    
     if (body.dcNumber !== undefined) {
       updateData.dcNumber = body.dcNumber ? body.dcNumber.trim() : null;
     }
@@ -386,11 +420,86 @@ export async function PUT(request: NextRequest) {
       updateData.notes = body.notes ? body.notes.trim() : null;
     }
 
-    const updated = await db
-      .update(serviceRequests)
-      .set(updateData)
-      .where(eq(serviceRequests.id, parseInt(id)))
-      .returning();
+    // Perform update in a transaction to handle test bed synchronization
+    const updated = await db.transaction(async (tx) => {
+      // Update the service request
+      const updatedRecord = await tx
+        .update(serviceRequests)
+        .set(updateData)
+        .where(eq(serviceRequests.id, parseInt(id)))
+        .returning();
+
+      // Handle test bed status synchronization
+      if (statusChanged || testbedChanged) {
+        const currentStatus = updateData.status || existing[0].status;
+        const currentTestbedId = updateData.assignedTestbedId !== undefined ? updateData.assignedTestbedId : existing[0].assignedTestbedId;
+
+        // Status changed to "testing" - set test bed to "in_use"
+        if (statusChanged && currentStatus === 'testing' && currentTestbedId) {
+          await tx.update(testBeds)
+            .set({ status: 'in_use' })
+            .where(eq(testBeds.id, currentTestbedId));
+        }
+
+        // Status changed to "completed" - check if test bed should be set to "available"
+        if (statusChanged && currentStatus === 'completed' && currentTestbedId) {
+          // Check if there are other jobs using this test bed
+          const otherActiveJobs = await tx
+            .select()
+            .from(serviceRequests)
+            .where(
+              and(
+                eq(serviceRequests.assignedTestbedId, currentTestbedId),
+                eq(serviceRequests.status, 'testing'),
+                ne(serviceRequests.id, parseInt(id))
+              )
+            )
+            .limit(1);
+
+          // If no other active jobs, set test bed to available
+          if (otherActiveJobs.length === 0) {
+            await tx.update(testBeds)
+              .set({ status: 'available' })
+              .where(eq(testBeds.id, currentTestbedId));
+          }
+        }
+
+        // Test bed reassignment - update both old and new test beds
+        if (testbedChanged) {
+          // Update old test bed if it exists
+          if (oldTestbedId) {
+            // Check if there are other jobs using the old test bed
+            const otherJobsOnOldTestbed = await tx
+              .select()
+              .from(serviceRequests)
+              .where(
+                and(
+                  eq(serviceRequests.assignedTestbedId, oldTestbedId),
+                  eq(serviceRequests.status, 'testing'),
+                  ne(serviceRequests.id, parseInt(id))
+                )
+              )
+              .limit(1);
+
+            // If no other active jobs on old test bed, set it to available
+            if (otherJobsOnOldTestbed.length === 0) {
+              await tx.update(testBeds)
+                .set({ status: 'available' })
+                .where(eq(testBeds.id, oldTestbedId));
+            }
+          }
+
+          // Update new test bed if it exists and job is in testing status
+          if (currentTestbedId && currentStatus === 'testing') {
+            await tx.update(testBeds)
+              .set({ status: 'in_use' })
+              .where(eq(testBeds.id, currentTestbedId));
+          }
+        }
+      }
+
+      return updatedRecord;
+    });
 
     // Log significant changes
     for (const change of changes) {
@@ -401,8 +510,30 @@ export async function PUT(request: NextRequest) {
         fieldName: change.fieldName,
         oldValue: change.oldValue,
         newValue: change.newValue,
-        timestamp: new Date().toISOString(),
+        timestamp: currentTimestamp,
         metadata: JSON.stringify({ jobCardNumber: updated[0].jobCardNumber })
+      });
+    }
+
+    // Create status history entry if status changed
+    if (statusChanged) {
+      await db.insert(statusHistory).values({
+        serviceRequestId: parseInt(id),
+        status: updateData.status,
+        notes: `Status changed from ${existing[0].status} to ${updateData.status}`,
+        changedBy: 'System',
+        changedAt: currentTimestamp,
+      });
+    }
+
+    // Create status history entry for test bed assignment change
+    if (testbedChanged) {
+      await db.insert(statusHistory).values({
+        serviceRequestId: parseInt(id),
+        status: updateData.status || existing[0].status,
+        notes: `Test bed assignment changed from ${oldTestbedId || 'None'} to ${updateData.assignedTestbedId || 'None'}`,
+        changedBy: 'System',
+        changedAt: currentTimestamp,
       });
     }
 
