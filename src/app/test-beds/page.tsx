@@ -10,9 +10,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Pencil, Trash2, ArrowLeft, Search } from "lucide-react"
+import { Plus, Pencil, Trash2, ArrowLeft, Search, Eye, Clock, AlertCircle } from "lucide-react"
 import Link from "next/link"
 import { useForm, Controller } from "react-hook-form"
+import { toast } from "sonner"
 
 type TestBed = {
   id: number
@@ -21,6 +22,35 @@ type TestBed = {
   location: string | null
   status: string
   createdAt: string
+  currentTask?: {
+    id: number
+    jobCardNumber: string
+    serviceRequestId: number
+    assignedEmployeeId: number | null
+    scheduledStartDate: string | null
+    scheduledEndDate: string | null
+    actualStartDate: string | null
+    priority: string
+  } | null
+  queueCount?: number
+}
+
+type TestBedTask = {
+  id: number
+  serviceRequestId: number
+  testbedId: number
+  assignedEmployeeId: number | null
+  status: string
+  priority: string
+  scheduledStartDate: string | null
+  scheduledEndDate: string | null
+  actualStartDate: string | null
+  actualEndDate: string | null
+  queuePosition: number
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+  jobCardNumber: string
 }
 
 export default function TestBedsPage() {
@@ -29,6 +59,11 @@ export default function TestBedsPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingTestBed, setEditingTestBed] = useState<TestBed | null>(null)
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false)
+  const [selectedTestBed, setSelectedTestBed] = useState<TestBed | null>(null)
+  const [currentTask, setCurrentTask] = useState<TestBedTask | null>(null)
+  const [queuedTasks, setQueuedTasks] = useState<TestBedTask[]>([])
+  const [loadingStatus, setLoadingStatus] = useState(false)
 
   const { register, handleSubmit, reset, control, formState: { errors, isSubmitting } } = useForm()
 
@@ -40,9 +75,48 @@ export default function TestBedsPage() {
         : '/api/test-beds?limit=100'
       const res = await fetch(url)
       const data = await res.json()
-      setTestBeds(data)
+      
+      // Fetch additional data for each test bed
+      const enrichedData = await Promise.all(
+        data.map(async (testBed: TestBed) => {
+          let currentTask = null
+          let queueCount = 0
+          
+          // Fetch current task if in_use
+          if (testBed.status === 'in_use') {
+            try {
+              const taskRes = await fetch(`/api/test-beds/${testBed.id}/current-task`)
+              if (taskRes.ok) {
+                currentTask = await taskRes.json()
+              }
+            } catch (err) {
+              console.error('Failed to fetch current task:', err)
+            }
+          }
+          
+          // Fetch queue count
+          try {
+            const queueRes = await fetch(`/api/test-beds/${testBed.id}/queue`)
+            if (queueRes.ok) {
+              const queue = await queueRes.json()
+              queueCount = queue.length
+            }
+          } catch (err) {
+            console.error('Failed to fetch queue:', err)
+          }
+          
+          return {
+            ...testBed,
+            currentTask,
+            queueCount
+          }
+        })
+      )
+      
+      setTestBeds(enrichedData)
     } catch (error) {
       console.error('Failed to fetch test beds:', error)
+      toast.error('Failed to load test beds')
     } finally {
       setLoading(false)
     }
@@ -65,13 +139,17 @@ export default function TestBedsPage() {
       })
 
       if (res.ok) {
+        toast.success(editingTestBed ? 'Test bed updated' : 'Test bed created')
         setIsDialogOpen(false)
         reset()
         setEditingTestBed(null)
         fetchTestBeds()
+      } else {
+        toast.error('Failed to save test bed')
       }
     } catch (error) {
       console.error('Failed to save test bed:', error)
+      toast.error('An error occurred')
     }
   }
 
@@ -82,15 +160,52 @@ export default function TestBedsPage() {
   }
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this test bed?')) return
+    // Use custom dialog instead of browser confirm
+    const confirmed = window.confirm('Are you sure you want to delete this test bed?')
+    if (!confirmed) return
 
     try {
       const res = await fetch(`/api/test-beds?id=${id}`, { method: 'DELETE' })
       if (res.ok) {
+        toast.success('Test bed deleted')
         fetchTestBeds()
+      } else {
+        toast.error('Failed to delete test bed')
       }
     } catch (error) {
       console.error('Failed to delete test bed:', error)
+      toast.error('An error occurred')
+    }
+  }
+
+  const handleViewStatus = async (testBed: TestBed) => {
+    setSelectedTestBed(testBed)
+    setStatusDialogOpen(true)
+    setLoadingStatus(true)
+    setCurrentTask(null)
+    setQueuedTasks([])
+    
+    try {
+      // Fetch current task
+      if (testBed.status === 'in_use') {
+        const taskRes = await fetch(`/api/test-beds/${testBed.id}/current-task`)
+        if (taskRes.ok) {
+          const task = await taskRes.json()
+          setCurrentTask(task)
+        }
+      }
+      
+      // Fetch queued tasks
+      const queueRes = await fetch(`/api/test-beds/${testBed.id}/queue`)
+      if (queueRes.ok) {
+        const queue = await queueRes.json()
+        setQueuedTasks(queue)
+      }
+    } catch (error) {
+      console.error('Failed to fetch status:', error)
+      toast.error('Failed to load status details')
+    } finally {
+      setLoadingStatus(false)
     }
   }
 
@@ -102,6 +217,29 @@ export default function TestBedsPage() {
     }
     const config = variants[status] || { variant: "default", label: status }
     return <Badge variant={config.variant}>{config.label}</Badge>
+  }
+
+  const getPriorityBadge = (priority: string) => {
+    const variants: Record<string, { className: string, label: string }> = {
+      urgent: { className: "bg-red-100 text-red-800 border-red-300", label: "Urgent" },
+      high: { className: "bg-orange-100 text-orange-800 border-orange-300", label: "High" },
+      normal: { className: "bg-blue-100 text-blue-800 border-blue-300", label: "Normal" },
+      low: { className: "bg-gray-100 text-gray-800 border-gray-300", label: "Low" }
+    }
+    const config = variants[priority] || variants.normal
+    return <Badge className={config.className}>{config.label}</Badge>
+  }
+
+  const formatDateTime = (dateStr: string | null) => {
+    if (!dateStr) return '-'
+    const date = new Date(dateStr)
+    return date.toLocaleString('en-US', { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
   }
 
   return (
@@ -224,6 +362,8 @@ export default function TestBedsPage() {
                       <TableHead>Description</TableHead>
                       <TableHead>Location</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Current Task</TableHead>
+                      <TableHead>Queue</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -234,8 +374,40 @@ export default function TestBedsPage() {
                         <TableCell className="max-w-xs truncate">{testBed.description || '-'}</TableCell>
                         <TableCell>{testBed.location || '-'}</TableCell>
                         <TableCell>{getStatusBadge(testBed.status)}</TableCell>
+                        <TableCell>
+                          {testBed.status === 'in_use' && testBed.currentTask ? (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-sm font-medium text-blue-600">
+                                {testBed.currentTask.jobCardNumber}
+                              </span>
+                              {testBed.currentTask.priority && (
+                                <div>{getPriorityBadge(testBed.currentTask.priority)}</div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400 text-sm">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {testBed.queueCount && testBed.queueCount > 0 ? (
+                            <Badge variant="secondary" className="flex items-center gap-1 w-fit">
+                              <Clock className="w-3 h-3" />
+                              {testBed.queueCount} queued
+                            </Badge>
+                          ) : (
+                            <span className="text-gray-400 text-sm">-</span>
+                          )}
+                        </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={() => handleViewStatus(testBed)}
+                              title="View Status"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </Button>
                             <Button variant="ghost" size="icon" onClick={() => handleEdit(testBed)}>
                               <Pencil className="w-4 h-4" />
                             </Button>
@@ -253,6 +425,112 @@ export default function TestBedsPage() {
           </CardContent>
         </Card>
       </main>
+
+      {/* Status Details Dialog */}
+      <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Test Bed Status - {selectedTestBed?.name}</DialogTitle>
+            <DialogDescription>
+              Current task and queue details
+            </DialogDescription>
+          </DialogHeader>
+          
+          {loadingStatus ? (
+            <div className="text-center py-8 text-gray-500">Loading status...</div>
+          ) : (
+            <div className="space-y-6">
+              {/* Current Task Section */}
+              <div>
+                <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                  <AlertCircle className="w-5 h-5" />
+                  Current Task
+                </h3>
+                {currentTask ? (
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label className="text-gray-500">Job Card Number</Label>
+                          <p className="font-semibold text-blue-600">{currentTask.jobCardNumber}</p>
+                        </div>
+                        <div>
+                          <Label className="text-gray-500">Priority</Label>
+                          <div className="mt-1">{getPriorityBadge(currentTask.priority)}</div>
+                        </div>
+                        <div>
+                          <Label className="text-gray-500">Scheduled Start</Label>
+                          <p className="text-sm">{formatDateTime(currentTask.scheduledStartDate)}</p>
+                        </div>
+                        <div>
+                          <Label className="text-gray-500">Scheduled End</Label>
+                          <p className="text-sm">{formatDateTime(currentTask.scheduledEndDate)}</p>
+                        </div>
+                        <div>
+                          <Label className="text-gray-500">Actual Start</Label>
+                          <p className="text-sm">{formatDateTime(currentTask.actualStartDate)}</p>
+                        </div>
+                        <div>
+                          <Label className="text-gray-500">Status</Label>
+                          <Badge className="mt-1">In Progress</Badge>
+                        </div>
+                      </div>
+                      {currentTask.notes && (
+                        <div className="mt-4">
+                          <Label className="text-gray-500">Notes</Label>
+                          <p className="text-sm mt-1">{currentTask.notes}</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="text-center py-6 text-gray-500 border rounded-lg bg-gray-50">
+                    No task currently in progress
+                  </div>
+                )}
+              </div>
+
+              {/* Queue Section */}
+              <div>
+                <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                  <Clock className="w-5 h-5" />
+                  Task Queue ({queuedTasks.length})
+                </h3>
+                {queuedTasks.length > 0 ? (
+                  <div className="border rounded-lg overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-16">Position</TableHead>
+                          <TableHead>Job Card</TableHead>
+                          <TableHead>Priority</TableHead>
+                          <TableHead>Scheduled Start</TableHead>
+                          <TableHead>Scheduled End</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {queuedTasks.map((task, index) => (
+                          <TableRow key={task.id}>
+                            <TableCell className="font-semibold">#{index + 1}</TableCell>
+                            <TableCell className="font-medium text-blue-600">{task.jobCardNumber}</TableCell>
+                            <TableCell>{getPriorityBadge(task.priority)}</TableCell>
+                            <TableCell className="text-sm">{formatDateTime(task.scheduledStartDate)}</TableCell>
+                            <TableCell className="text-sm">{formatDateTime(task.scheduledEndDate)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <div className="text-center py-6 text-gray-500 border rounded-lg bg-gray-50">
+                    No tasks in queue
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
