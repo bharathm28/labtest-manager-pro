@@ -105,6 +105,21 @@ export default function TestBedsPage() {
             console.error('Failed to fetch queue:', err)
           }
           
+          // Auto-fix test bed status if needed
+          if (testBed.status === 'in_use' && !currentTask && queueCount === 0) {
+            // No current task and no queue - should be available
+            try {
+              await fetch(`/api/test-beds?id=${testBed.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: 'available' })
+              })
+              testBed.status = 'available'
+            } catch (err) {
+              console.error('Failed to update test bed status:', err)
+            }
+          }
+          
           return {
             ...testBed,
             currentTask,

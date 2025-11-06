@@ -22,6 +22,34 @@
       "when": 1762406708223,
       "tag": "0002_confused_chronomancer",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1762430140807,
+      "tag": "0003_volatile_abomination",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1762430141577,
+      "tag": "0004_sad_marauders",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1762430141927,
+      "tag": "0005_bizarre_risque",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1762430294648,
+      "tag": "0006_gorgeous_the_professor",
+      "breakpoints": true
     }
   ]
 }

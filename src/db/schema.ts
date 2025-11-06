@@ -31,6 +31,7 @@ export const employees = sqliteTable('employees', {
   phone: text('phone'),
   department: text('department'),
   employeeCode: text('employee_code').unique(),
+  status: text('status').notNull().default('available'),
   createdAt: text('created_at').notNull(),
 });
 
@@ -103,11 +104,14 @@ export const inventory = sqliteTable('inventory', {
   type: text('type'),
   serialNumber: text('serial_number').unique(),
   description: text('description'),
+  model: text('model'),
+  category: text('category'),
   status: text('status').notNull().default('available'),
   currentLocation: text('current_location'),
   assignedToEmployeeId: integer('assigned_to_employee_id').references(() => employees.id),
   assignedDate: text('assigned_date'),
   assignedReason: text('assigned_reason'),
+  nextCalibration: text('next_calibration'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
@@ -154,4 +158,17 @@ export const testbedTaskTransfers = sqliteTable('testbed_task_transfers', {
   transferredBy: text('transferred_by'),
   transferredAt: text('transferred_at').notNull(),
   notes: text('notes'),
+});
+
+// Task Notifications table
+export const taskNotifications = sqliteTable('task_notifications', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  taskId: integer('task_id').references(() => testbedTasks.id).notNull(),
+  notificationType: text('notification_type').notNull(),
+  scheduledFor: text('scheduled_for').notNull(),
+  sent: integer('sent', { mode: 'boolean' }).default(false).notNull(),
+  sentAt: text('sent_at'),
+  employeeId: integer('employee_id').references(() => employees.id).notNull(),
+  message: text('message').notNull(),
+  createdAt: text('created_at').notNull(),
 });

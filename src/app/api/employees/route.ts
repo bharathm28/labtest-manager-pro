@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
     const offset = parseInt(searchParams.get('offset') ?? '0');
     const search = searchParams.get('search');
     const department = searchParams.get('department');
+    const status = searchParams.get('status');
 
     let query = db.select().from(employees);
 
@@ -55,6 +56,10 @@ export async function GET(request: NextRequest) {
 
     if (department) {
       conditions.push(eq(employees.department, department));
+    }
+
+    if (status) {
+      conditions.push(eq(employees.status, status));
     }
 
     // Apply conditions if any exist
@@ -79,7 +84,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, designation, email, phone, department, employeeCode } = body;
+    const { name, designation, email, phone, department, employeeCode, status } = body;
 
     // Validate required fields
     if (!name || typeof name !== 'string' || name.trim() === '') {
@@ -113,6 +118,7 @@ export async function POST(request: NextRequest) {
       phone: phone ? phone.trim() : null,
       department: department ? department.trim() : null,
       employeeCode: employeeCode ? employeeCode.trim() : null,
+      status: status || 'available',
       createdAt: new Date().toISOString()
     };
 
@@ -151,7 +157,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, designation, email, phone, department, employeeCode } = body;
+    const { name, designation, email, phone, department, employeeCode, status } = body;
 
     // Check if employee exists
     const existingEmployee = await db.select()
@@ -213,6 +219,9 @@ export async function PUT(request: NextRequest) {
     }
     if (employeeCode !== undefined) {
       updateData.employeeCode = employeeCode ? employeeCode.trim() : null;
+    }
+    if (status !== undefined) {
+      updateData.status = status;
     }
 
     const updated = await db.update(employees)

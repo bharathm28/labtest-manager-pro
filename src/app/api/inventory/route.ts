@@ -4,6 +4,7 @@ import { inventory } from '@/db/schema';
 import { eq, like, and, or, desc } from 'drizzle-orm';
 
 const VALID_STATUSES = ['available', 'assigned', 'maintenance', 'retired'] as const;
+const VALID_CATEGORIES = ['equipment', 'consumable', 'tool', 'standard'] as const;
 
 export async function GET(request: NextRequest) {
   try {
@@ -42,6 +43,7 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search');
     const status = searchParams.get('status');
     const type = searchParams.get('type');
+    const category = searchParams.get('category');
     const assignedToEmployeeId = searchParams.get('assignedToEmployeeId');
 
     // Validate status if provided
@@ -50,6 +52,17 @@ export async function GET(request: NextRequest) {
         { 
           error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}`, 
           code: 'INVALID_STATUS' 
+        },
+        { status: 400 }
+      );
+    }
+
+    // Validate category if provided
+    if (category && !VALID_CATEGORIES.includes(category as any)) {
+      return NextResponse.json(
+        { 
+          error: `Invalid category. Must be one of: ${VALID_CATEGORIES.join(', ')}`, 
+          code: 'INVALID_CATEGORY' 
         },
         { status: 400 }
       );
@@ -65,13 +78,14 @@ export async function GET(request: NextRequest) {
 
     const conditions = [];
 
-    // Search across name, serialNumber, and description
+    // Search across name, serialNumber, description, and model
     if (search) {
       conditions.push(
         or(
           like(inventory.name, `%${search}%`),
           like(inventory.serialNumber, `%${search}%`),
-          like(inventory.description, `%${search}%`)
+          like(inventory.description, `%${search}%`),
+          like(inventory.model, `%${search}%`)
         )
       );
     }
@@ -84,6 +98,11 @@ export async function GET(request: NextRequest) {
     // Filter by type
     if (type) {
       conditions.push(eq(inventory.type, type));
+    }
+
+    // Filter by category
+    if (category) {
+      conditions.push(eq(inventory.category, category));
     }
 
     // Filter by assigned employee
@@ -120,11 +139,14 @@ export async function POST(request: NextRequest) {
       type,
       serialNumber,
       description,
+      model,
+      category,
       status,
       currentLocation,
       assignedToEmployeeId,
       assignedDate,
-      assignedReason
+      assignedReason,
+      nextCalibration
     } = body;
 
     // Validate required field
@@ -141,6 +163,17 @@ export async function POST(request: NextRequest) {
         { 
           error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}`, 
           code: 'INVALID_STATUS' 
+        },
+        { status: 400 }
+      );
+    }
+
+    // Validate category if provided
+    if (category && !VALID_CATEGORIES.includes(category)) {
+      return NextResponse.json(
+        { 
+          error: `Invalid category. Must be one of: ${VALID_CATEGORIES.join(', ')}`, 
+          code: 'INVALID_CATEGORY' 
         },
         { status: 400 }
       );
@@ -163,11 +196,14 @@ export async function POST(request: NextRequest) {
       type: type ? type.trim() : null,
       serialNumber: serialNumber ? serialNumber.trim() : null,
       description: description ? description.trim() : null,
+      model: model ? model.trim() : null,
+      category: category || null,
       status: status || 'available',
       currentLocation: currentLocation ? currentLocation.trim() : null,
       assignedToEmployeeId: assignedToEmployeeId ? parseInt(assignedToEmployeeId) : null,
       assignedDate: assignedDate || null,
       assignedReason: assignedReason ? assignedReason.trim() : null,
+      nextCalibration: nextCalibration || null,
       createdAt: timestamp,
       updatedAt: timestamp
     };
@@ -231,11 +267,14 @@ export async function PUT(request: NextRequest) {
       type,
       serialNumber,
       description,
+      model,
+      category,
       status,
       currentLocation,
       assignedToEmployeeId,
       assignedDate,
-      assignedReason
+      assignedReason,
+      nextCalibration
     } = body;
 
     // Validate name if provided
@@ -252,6 +291,17 @@ export async function PUT(request: NextRequest) {
         { 
           error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}`, 
           code: 'INVALID_STATUS' 
+        },
+        { status: 400 }
+      );
+    }
+
+    // Validate category if provided
+    if (category !== undefined && category !== null && !VALID_CATEGORIES.includes(category)) {
+      return NextResponse.json(
+        { 
+          error: `Invalid category. Must be one of: ${VALID_CATEGORIES.join(', ')}`, 
+          code: 'INVALID_CATEGORY' 
         },
         { status: 400 }
       );
@@ -276,11 +326,14 @@ export async function PUT(request: NextRequest) {
     if (type !== undefined) updates.type = type ? type.trim() : null;
     if (serialNumber !== undefined) updates.serialNumber = serialNumber ? serialNumber.trim() : null;
     if (description !== undefined) updates.description = description ? description.trim() : null;
+    if (model !== undefined) updates.model = model ? model.trim() : null;
+    if (category !== undefined) updates.category = category || null;
     if (status !== undefined) updates.status = status;
     if (currentLocation !== undefined) updates.currentLocation = currentLocation ? currentLocation.trim() : null;
     if (assignedToEmployeeId !== undefined) updates.assignedToEmployeeId = assignedToEmployeeId ? parseInt(assignedToEmployeeId) : null;
     if (assignedDate !== undefined) updates.assignedDate = assignedDate;
     if (assignedReason !== undefined) updates.assignedReason = assignedReason ? assignedReason.trim() : null;
+    if (nextCalibration !== undefined) updates.nextCalibration = nextCalibration;
 
     const updated = await db
       .update(inventory)

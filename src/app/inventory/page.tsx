@@ -10,10 +10,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
-import { Plus, Pencil, Trash2, ArrowLeft, Search, History, Package, User, MapPin, ArrowUpDown } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Plus, Pencil, Trash2, ArrowLeft, Search, History, Package, User, MapPin, ArrowUpDown, Calendar } from "lucide-react"
 import Link from "next/link"
 import { useForm, Controller } from "react-hook-form"
 import { format } from "date-fns"
+import { toast } from "sonner"
 
 type InventoryItem = {
   id: number
@@ -21,11 +23,14 @@ type InventoryItem = {
   type: string | null
   serialNumber: string | null
   description: string | null
+  model: string | null
+  category: string | null
   status: string
   currentLocation: string | null
   assignedToEmployeeId: number | null
   assignedDate: string | null
   assignedReason: string | null
+  nextCalibration: string | null
   createdAt: string
   updatedAt: string
 }
@@ -56,6 +61,7 @@ export default function InventoryPage() {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [activeTab, setActiveTab] = useState("all")
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc")
   
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -77,12 +83,14 @@ export default function InventoryPage() {
       let url = '/api/inventory?limit=100'
       if (searchTerm) url += `&search=${encodeURIComponent(searchTerm)}`
       if (statusFilter !== 'all') url += `&status=${statusFilter}`
+      if (activeTab !== 'all') url += `&category=${activeTab}`
 
       const res = await fetch(url)
       const data = await res.json()
       setInventory(data)
     } catch (error) {
       console.error('Failed to fetch inventory:', error)
+      toast.error('Failed to load inventory')
     } finally {
       setLoading(false)
     }
@@ -104,12 +112,7 @@ export default function InventoryPage() {
 
   useEffect(() => {
     fetchInventory()
-  }, [searchTerm, statusFilter])
-
-  const sortedInventory = [...inventory].sort((a, b) => {
-    const comparison = a.name.localeCompare(b.name)
-    return sortOrder === "asc" ? comparison : -comparison
-  })
+  }, [searchTerm, statusFilter, activeTab])
 
   const onSubmit = async (data: any) => {
     try {
@@ -129,6 +132,7 @@ export default function InventoryPage() {
       })
 
       if (res.ok) {
+        toast.success(editingItem ? 'Item updated' : 'Item created')
         // Create log entry if status changed during edit
         if (editingItem && editingItem.status !== data.status) {
           await fetch('/api/inventory-logs', {
@@ -151,9 +155,12 @@ export default function InventoryPage() {
         reset()
         setEditingItem(null)
         fetchInventory()
+      } else {
+        toast.error('Failed to save inventory')
       }
     } catch (error) {
       console.error('Failed to save inventory:', error)
+      toast.error('An error occurred')
     }
   }
 
@@ -293,6 +300,18 @@ export default function InventoryPage() {
     }
   }
 
+  const getCategoryBadge = (category: string | null) => {
+    if (!category) return <Badge variant="outline">Uncategorized</Badge>
+    const variants: Record<string, { className: string, label: string }> = {
+      equipment: { className: "bg-purple-100 text-purple-800 border-purple-300", label: "Equipment" },
+      consumable: { className: "bg-green-100 text-green-800 border-green-300", label: "Consumable" },
+      tool: { className: "bg-blue-100 text-blue-800 border-blue-300", label: "Tool" },
+      standard: { className: "bg-yellow-100 text-yellow-800 border-yellow-300", label: "Standard" }
+    }
+    const config = variants[category] || { className: "bg-gray-100 text-gray-800 border-gray-300", label: category }
+    return <Badge className={config.className}>{config.label}</Badge>
+  }
+
   const getEmployeeName = (employeeId: number | null) => {
     if (!employeeId) return '-'
     const emp = employees.find(e => e.id === employeeId)
@@ -331,7 +350,7 @@ export default function InventoryPage() {
             </Button>
             <div>
               <h1 className="text-2xl font-bold">Inventory Management</h1>
-              <p className="text-gray-600 text-sm">Track and manage laboratory equipment and assets</p>
+              <p className="text-gray-600 text-sm">Track equipment and consumables</p>
             </div>
           </div>
         </div>
@@ -366,17 +385,41 @@ export default function InventoryPage() {
                         <Input 
                           id="name" 
                           {...register('name', { required: 'Name is required' })}
-                          placeholder="e.g., Laptop Dell XPS 15"
+                          placeholder="e.g., Current Clamp Probes"
                         />
                         {errors.name && <p className="text-sm text-red-600 mt-1">{errors.name.message as string}</p>}
+                      </div>
+                      <div>
+                        <Label htmlFor="category">Category</Label>
+                        <Controller
+                          name="category"
+                          control={control}
+                          render={({ field }) => (
+                            <Select onValueChange={field.onChange} value={field.value || ""}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select category" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="equipment">Equipment</SelectItem>
+                                <SelectItem value="consumable">Consumable</SelectItem>
+                                <SelectItem value="tool">Tool</SelectItem>
+                                <SelectItem value="standard">Calibration Standard</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          )}
+                        />
                       </div>
                       <div>
                         <Label htmlFor="type">Type</Label>
                         <Input 
                           id="type" 
                           {...register('type')}
-                          placeholder="e.g., laptop, mouse, cable"
+                          placeholder="e.g., Consumable, Tool"
                         />
+                      </div>
+                      <div>
+                        <Label htmlFor="model">Model</Label>
+                        <Input id="model" {...register('model')} placeholder="Model number" />
                       </div>
                       <div>
                         <Label htmlFor="serialNumber">Serial Number</Label>
@@ -409,7 +452,15 @@ export default function InventoryPage() {
                       </div>
                       <div>
                         <Label htmlFor="currentLocation">Current Location</Label>
-                        <Input id="currentLocation" {...register('currentLocation')} placeholder="e.g., Lab A, Storage Room" />
+                        <Input id="currentLocation" {...register('currentLocation')} placeholder="e.g., Lab Storage, Calibration Room" />
+                      </div>
+                      <div>
+                        <Label htmlFor="nextCalibration">Next Calibration Date</Label>
+                        <Input 
+                          id="nextCalibration" 
+                          type="datetime-local"
+                          {...register('nextCalibration')} 
+                        />
                       </div>
                     </div>
                     <DialogFooter>
@@ -426,106 +477,130 @@ export default function InventoryPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-col md:flex-row gap-4 mb-6">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <Input 
-                  placeholder="Search by name, serial number, or description..." 
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full md:w-[180px]">
-                  <SelectValue placeholder="Filter by status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="available">Available</SelectItem>
-                  <SelectItem value="assigned">Assigned</SelectItem>
-                  <SelectItem value="maintenance">Maintenance</SelectItem>
-                  <SelectItem value="retired">Retired</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button variant="outline" onClick={() => setSortOrder(prev => prev === "asc" ? "desc" : "asc")}>
-                <ArrowUpDown className="w-4 h-4 mr-2" />
-                Sort {sortOrder === "asc" ? "A-Z" : "Z-A"}
-              </Button>
-            </div>
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-5 mb-6">
+                <TabsTrigger value="all">All Items</TabsTrigger>
+                <TabsTrigger value="equipment">Equipment</TabsTrigger>
+                <TabsTrigger value="consumable">Consumables</TabsTrigger>
+                <TabsTrigger value="tool">Tools</TabsTrigger>
+                <TabsTrigger value="standard">Standards</TabsTrigger>
+              </TabsList>
 
-            {loading ? (
-              <div className="text-center py-8 text-gray-500">Loading...</div>
-            ) : sortedInventory.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">No inventory items found</div>
-            ) : (
-              <div className="border rounded-lg overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Item</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Serial Number</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Assigned To</TableHead>
-                      <TableHead>Location</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sortedInventory.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell>
-                          <div className="font-medium">{item.name}</div>
-                          {item.description && <div className="text-sm text-gray-500 max-w-xs truncate">{item.description}</div>}
-                        </TableCell>
-                        <TableCell>{item.type || '-'}</TableCell>
-                        <TableCell>
-                          {item.serialNumber ? (
-                            <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{item.serialNumber}</span>
-                          ) : '-'}
-                        </TableCell>
-                        <TableCell>{getStatusBadge(item.status)}</TableCell>
-                        <TableCell>{getEmployeeName(item.assignedToEmployeeId)}</TableCell>
-                        <TableCell>
-                          {item.currentLocation ? (
-                            <div className="flex items-center gap-1">
-                              <MapPin className="w-3 h-3 text-gray-400" />
-                              <span className="text-sm">{item.currentLocation}</span>
-                            </div>
-                          ) : '-'}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            {item.status === 'available' && (
-                              <Button variant="ghost" size="sm" onClick={() => handleAssign(item)}>
-                                <User className="w-3 h-3 mr-1" />
-                                Assign
-                              </Button>
-                            )}
-                            {item.status === 'assigned' && (
-                              <Button variant="ghost" size="sm" onClick={() => handleReturn(item)}>
-                                <Package className="w-3 h-3 mr-1" />
-                                Return
-                              </Button>
-                            )}
-                            <Button variant="ghost" size="icon" onClick={() => handleViewLogs(item)}>
-                              <History className="w-4 h-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
-                              <Pencil className="w-4 h-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleDelete(item.id)}>
-                              <Trash2 className="w-4 h-4 text-red-600" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+              <div className="flex flex-col md:flex-row gap-4 mb-6">
+                <div className="flex-1 relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                  <Input 
+                    placeholder="Search by name, serial number, model, or description..." 
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-full md:w-[180px]">
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="available">Available</SelectItem>
+                    <SelectItem value="assigned">Assigned</SelectItem>
+                    <SelectItem value="maintenance">Maintenance</SelectItem>
+                    <SelectItem value="retired">Retired</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" onClick={() => setSortOrder(prev => prev === "asc" ? "desc" : "asc")}>
+                  <ArrowUpDown className="w-4 h-4 mr-2" />
+                  Sort {sortOrder === "asc" ? "A-Z" : "Z-A"}
+                </Button>
               </div>
-            )}
+
+              <TabsContent value={activeTab} className="mt-0">
+                {loading ? (
+                  <div className="text-center py-8 text-gray-500">Loading...</div>
+                ) : inventory.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">No inventory items found</div>
+                ) : (
+                  <div className="border rounded-lg overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Item Name</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Model</TableHead>
+                          <TableHead>Serial Number</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Location</TableHead>
+                          <TableHead>Next Calibration</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {inventory.sort((a, b) => {
+                          const comparison = a.name.localeCompare(b.name)
+                          return sortOrder === "asc" ? comparison : -comparison
+                        }).map((item) => (
+                          <TableRow key={item.id}>
+                            <TableCell>
+                              <div className="font-medium">{item.name}</div>
+                              {item.description && <div className="text-sm text-gray-500 max-w-xs truncate">{item.description}</div>}
+                            </TableCell>
+                            <TableCell>{getCategoryBadge(item.category)}</TableCell>
+                            <TableCell>{item.model || '-'}</TableCell>
+                            <TableCell>
+                              {item.serialNumber ? (
+                                <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{item.serialNumber}</span>
+                              ) : 'N/A'}
+                            </TableCell>
+                            <TableCell>{getStatusBadge(item.status)}</TableCell>
+                            <TableCell>
+                              {item.currentLocation ? (
+                                <div className="flex items-center gap-1">
+                                  <MapPin className="w-3 h-3 text-gray-400" />
+                                  <span className="text-sm">{item.currentLocation}</span>
+                                </div>
+                              ) : '-'}
+                            </TableCell>
+                            <TableCell>
+                              {item.nextCalibration ? (
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="w-3 h-3 text-gray-400" />
+                                  <span className="text-sm">{formatDateTime(item.nextCalibration)}</span>
+                                </div>
+                              ) : 'N/A'}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-1">
+                                {item.status === 'available' && (
+                                  <Button variant="ghost" size="sm" onClick={() => handleAssign(item)}>
+                                    <User className="w-3 h-3 mr-1" />
+                                    Assign
+                                  </Button>
+                                )}
+                                {item.status === 'assigned' && (
+                                  <Button variant="ghost" size="sm" onClick={() => handleReturn(item)}>
+                                    <Package className="w-3 h-3 mr-1" />
+                                    Return
+                                  </Button>
+                                )}
+                                <Button variant="ghost" size="icon" onClick={() => handleViewLogs(item)}>
+                                  <History className="w-4 h-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
+                                  <Pencil className="w-4 h-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => handleDelete(item.id)}>
+                                  <Trash2 className="w-4 h-4 text-red-600" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
 
