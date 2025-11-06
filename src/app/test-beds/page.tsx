@@ -463,12 +463,17 @@ export default function TestBedsPage() {
                           <p className="text-sm">{formatDateTime(currentTask.scheduledStartDate)}</p>
                         </div>
                         <div>
-                          <Label className="text-gray-500">Scheduled End</Label>
-                          <p className="text-sm">{formatDateTime(currentTask.scheduledEndDate)}</p>
-                        </div>
-                        <div>
                           <Label className="text-gray-500">Actual Start</Label>
                           <p className="text-sm">{formatDateTime(currentTask.actualStartDate)}</p>
+                        </div>
+                        <div className="col-span-2">
+                          <Label className="text-gray-500 flex items-center gap-1">
+                            <Clock className="w-4 h-4 text-blue-600" />
+                            Expected Completion
+                          </Label>
+                          <p className="text-lg font-bold text-blue-700 mt-1">
+                            {formatDateTime(currentTask.scheduledEndDate)}
+                          </p>
                         </div>
                         <div>
                           <Label className="text-gray-500">Status</Label>
@@ -476,8 +481,8 @@ export default function TestBedsPage() {
                         </div>
                       </div>
                       {currentTask.notes && (
-                        <div className="mt-4">
-                          <Label className="text-gray-500">Notes</Label>
+                        <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                          <Label className="text-gray-600 font-semibold">Progress Notes</Label>
                           <p className="text-sm mt-1">{currentTask.notes}</p>
                         </div>
                       )}
@@ -505,7 +510,7 @@ export default function TestBedsPage() {
                           <TableHead>Job Card</TableHead>
                           <TableHead>Priority</TableHead>
                           <TableHead>Scheduled Start</TableHead>
-                          <TableHead>Scheduled End</TableHead>
+                          <TableHead>Expected Completion</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -515,7 +520,7 @@ export default function TestBedsPage() {
                             <TableCell className="font-medium text-blue-600">{task.jobCardNumber}</TableCell>
                             <TableCell>{getPriorityBadge(task.priority)}</TableCell>
                             <TableCell className="text-sm">{formatDateTime(task.scheduledStartDate)}</TableCell>
-                            <TableCell className="text-sm">{formatDateTime(task.scheduledEndDate)}</TableCell>
+                            <TableCell className="text-sm font-semibold">{formatDateTime(task.scheduledEndDate)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

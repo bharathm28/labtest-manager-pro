@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ArrowLeft, Search, Eye, Edit, History, Loader2, Calendar, Clock } from "lucide-react"
+import { ArrowLeft, Search, Eye, Edit, History, Loader2, Calendar, Clock, AlertCircle } from "lucide-react"
 import Link from "next/link"
 import { useForm, Controller } from "react-hook-form"
 import { format } from "date-fns"
@@ -247,6 +247,14 @@ export default function JobTrackingPage() {
     }
   }
 
+  const getExpectedCompletion = (job: ServiceRequest) => {
+    // For jobs in testing status, show expected completion
+    if (job.status === 'testing' && job.testingEndDate) {
+      return formatDateTime(job.testingEndDate)
+    }
+    return '-'
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b">
@@ -315,7 +323,7 @@ export default function JobTrackingPage() {
                       <TableHead>Status</TableHead>
                       <TableHead>Employee</TableHead>
                       <TableHead>Test Bed</TableHead>
-                      <TableHead>Requested Date</TableHead>
+                      <TableHead>Expected Completion</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -327,8 +335,28 @@ export default function JobTrackingPage() {
                         <TableCell className="max-w-xs truncate">{job.productName}</TableCell>
                         <TableCell>{getStatusBadge(job.status)}</TableCell>
                         <TableCell>{getEmployeeName(job.assignedEmployeeId)}</TableCell>
-                        <TableCell>{getTestBedName(job.assignedTestbedId)}</TableCell>
-                        <TableCell>{formatDateTime(job.requestedDate)}</TableCell>
+                        <TableCell>
+                          {job.assignedTestbedId ? (
+                            <div className="flex items-center gap-2">
+                              <span>{getTestBedName(job.assignedTestbedId)}</span>
+                              {job.status === 'testing' && (
+                                <Badge variant="secondary" className="text-xs">
+                                  In Progress
+                                </Badge>
+                              )}
+                            </div>
+                          ) : '-'}
+                        </TableCell>
+                        <TableCell>
+                          {getExpectedCompletion(job) !== '-' ? (
+                            <div className="flex items-center gap-1 text-sm">
+                              <Clock className="w-3 h-3 text-blue-500" />
+                              <span>{getExpectedCompletion(job)}</span>
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
                             <Button variant="ghost" size="icon" onClick={() => handleViewJob(job)}>
@@ -440,6 +468,15 @@ export default function JobTrackingPage() {
                       <span className="text-gray-600">Testing Start:</span>
                       <span>{formatDateTime(selectedJob.testingStartDate)}</span>
                     </div>
+                    {selectedJob.status === 'testing' && selectedJob.testingEndDate && (
+                      <div className="flex justify-between items-center bg-blue-50 p-2 rounded">
+                        <span className="text-gray-600 flex items-center gap-1">
+                          <Clock className="w-4 h-4 text-blue-600" />
+                          Expected Completion:
+                        </span>
+                        <span className="font-semibold text-blue-700">{formatDateTime(selectedJob.testingEndDate)}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between">
                       <span className="text-gray-600">Testing End:</span>
                       <span>{formatDateTime(selectedJob.testingEndDate)}</span>
